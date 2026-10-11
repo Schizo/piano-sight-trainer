@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Piano Sight Trainer</title>
+<meta name="description" content="Read a note on the treble or bass clef, play it on your real piano, and the microphone moves you to the next one.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif&family=Noto+Music&display=swap" rel="stylesheet">
+<style>
+/* Layout: one centred column. Settings, then the staff as the hero, live readouts, and a keyboard strip that mirrors what the mic hears. */
+:root{
+  --paper:#F2F4F7; --card:#FFFFFF; --ink:#161A23; --muted:#5B6476; --line:#D6DAE2;
+  --accent:#2747C9; --accent-ink:#FFFFFF; --good:#11804A; --bad:#C2362B;
+  --key-white:#FFFFFF; --key-black:#1A1D24; --key-edge:#B9BFCB;
+  --f-display:"Instrument Serif", Georgia, "Times New Roman", serif;
+  --f-body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --f-music:"Noto Music", "Segoe UI Symbol", "Apple Symbols", serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#10131A; --card:#181C25; --ink:#E8EBF1; --muted:#9AA3B4; --line:#2B3140;
+    --accent:#8299FF; --accent-ink:#0D1120; --good:#3DCB86; --bad:#FF7B6F;
+    --key-white:#DCE0E8; --key-black:#08090D; --key-edge:#3A4152;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#10131A; --card:#181C25; --ink:#E8EBF1; --muted:#9AA3B4; --line:#2B3140;
+  --accent:#8299FF; --accent-ink:#0D1120; --good:#3DCB86; --bad:#FF7B6F;
+  --key-white:#DCE0E8; --key-black:#08090D; --key-edge:#3A4152;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--f-body);padding-inline:16px;padding-block:max(20px,env(safe-area-inset-top)) max(32px,env(safe-area-inset-bottom))}
+.wrap{max-width:860px;margin:0 auto;display:grid;gap:18px}
+header{display:grid;gap:2px}
+h1{font:400 clamp(30px,6vw,42px)/1.05 var(--f-display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--muted);margin:0;max-width:60ch}
+
+.settings{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{font:500 14px var(--f-body);color:var(--ink);background:none;border:0;padding:7px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:14px;cursor:pointer;user-select:none}
+.chip input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.stage{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px 18px;display:grid;gap:8px}
+.stage-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.clef-name{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:600}
+.hint{font:500 14px var(--f-mono);color:var(--accent)}
+svg.staff{width:100%;height:auto;display:block;max-height:46vh}
+.staff .ln{stroke:var(--ink);stroke-width:1.3}
+.staff .ink{fill:var(--ink)}
+.staff .hole{fill:var(--card)}
+.staff .glyph{fill:var(--ink);font-family:var(--f-music)}
+.staff .note.ok .ink,.staff .note.ok .glyph{fill:var(--good)}
+.staff .note.ok .ln{stroke:var(--good)}
+.staff .note{transition:opacity .18s ease, transform .18s ease}
+.staff .note.out{opacity:0;transform:translateX(-14px)}
+
+.readout{display:grid;grid-template-columns:auto 1fr;gap:14px 20px;align-items:center}
+.status{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:14px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.status::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.status[data-s="on"]::before{background:var(--accent);animation:pulse 1.4s ease-in-out infinite}
+.status[data-s="ok"]{color:var(--good);border-color:var(--good)}
+.status[data-s="ok"]::before{background:var(--good)}
+.status[data-s="err"]{color:var(--bad);border-color:var(--bad)}
+.status[data-s="err"]::before{background:var(--bad)}
+@keyframes pulse{50%{opacity:.35}}
+.heard{display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-width:0}
+.heard-note{font:500 26px var(--f-mono);min-width:4.2ch;font-variant-numeric:tabular-nums}
+.heard-note.match{color:var(--good)}
+.heard-note.miss{color:var(--bad)}
+.meters{display:grid;gap:6px;flex:1;min-width:150px;max-width:300px}
+.meter{position:relative;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;width:0;background:var(--accent);transition:width .05s linear}
+.tuner{position:relative;height:6px;border-radius:3px;background:var(--line)}
+.tuner::after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--muted)}
+.tuner i{position:absolute;top:-2px;width:10px;height:10px;border-radius:50%;background:var(--ink);left:50%;margin-left:-5px;opacity:0;transition:left .08s linear}
+.meter-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+.meter-row span{width:44px;flex:none}
+.meter-row div{flex:1}
+
+.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{font:600 15px var(--f-body);border-radius:9px;padding:10px 18px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:hover{filter:brightness(1.06)}
+.sens{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:13px;color:var(--muted)}
+.sens input{accent-color:var(--accent);width:120px}
+
+.stats{display:flex;gap:28px;flex-wrap:wrap}
+.stat{display:grid}
+.stat b{font:500 22px var(--f-mono);font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+
+.kbd-wrap{overflow-x:auto;padding-bottom:4px}
+.kbd{position:relative;display:flex;height:110px;min-width:560px;user-select:none;touch-action:manipulation}
+.kbd .w{flex:1;background:var(--key-white);border:1px solid var(--key-edge);border-left:0;border-radius:0 0 5px 5px;position:relative;cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding-bottom:5px;font:500 9px var(--f-mono);color:var(--muted)}
+.kbd .w:first-child{border-left:1px solid var(--key-edge)}
+.kbd .b{position:absolute;top:0;height:62%;background:var(--key-black);border-radius:0 0 4px 4px;z-index:2;cursor:pointer}
+.kbd .k.heard{background:var(--accent)}
+.kbd .k.hint{box-shadow:inset 0 -6px 0 var(--accent)}
+.kbd .k.hit{background:var(--good)}
+.foot{font-size:13px;color:var(--muted);max-width:68ch}
+.foot p{margin:0 0 6px}
+
+@media (max-width:560px){
+  .readout{grid-template-columns:1fr}
+  .sens{margin-left:0}
+}
+@media (prefers-reduced-motion: reduce){
+  *{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Piano Sight Trainer</h1>
+    <p class="sub">Read the note, play it on your piano. When the microphone hears the right key, the next note appears.</p>
+  </header>
+
+  <div class="settings">
+    <div class="group">
+      <span class="label">Hand</span>
+      <div class="seg" id="hand">
+        <button type="button" data-v="right">Right · treble</button>
+        <button type="button" data-v="left">Left · bass</button>
+        <button type="button" data-v="both">Both</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label">Range</span>
+      <div class="seg" id="range">
+        <button type="button" data-v="staff">On the staff</button>
+        <button type="button" data-v="ext">+ ledger lines</button>
+      </div>
+    </div>
+    <div class="group">
+      <label class="chip"><input type="checkbox" id="acc"> Sharps &amp; flats</label>
+      <label class="chip"><input type="checkbox" id="anyOct"> Any octave</label>
+      <label class="chip"><input type="checkbox" id="hintOn"> Show name</label>
+    </div>
+  </div>
+
+  <section class="stage" aria-label="Current note">
+    <div class="stage-top">
+      <span class="clef-name" id="clefName">Right hand · Treble clef</span>
+      <span class="hint" id="hint" hidden></span>
+    </div>
+    <svg class="staff" id="staff" viewBox="0 0 360 190" role="img" aria-label="Note on staff"></svg>
+  </section>
+
+  <div class="readout">
+    <span class="status" id="status" data-s="off">Microphone off</span>
+    <div class="heard">
+      <span class="heard-note" id="heardNote" aria-live="polite">–</span>
+      <div class="meters">
+        <div class="meter-row"><span>Level</span><div class="meter"><i id="level"></i></div></div>
+        <div class="meter-row"><span>Tune</span><div class="tuner"><i id="tune"></i></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="startBtn" type="button">Start listening</button>
+    <button class="btn" id="skipBtn" type="button">Skip note</button>
+    <button class="btn" id="resetBtn" type="button">Reset score</button>
+    <label class="sens" for="sens">Mic sensitivity <input type="range" id="sens" min="1" max="10" value="6"></label>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="sCorrect">0</b><span>Correct</span></div>
+    <div class="stat"><b id="sAvg">–</b><span>Avg time</span></div>
+    <div class="stat"><b id="sBest">–</b><span>Fastest</span></div>
+    <div class="stat"><b id="sSkip">0</b><span>Skipped</span></div>
+  </div>
+
+  <div class="kbd-wrap"><div class="kbd" id="kbd" aria-label="Keyboard, C2 to C6. Click a key to answer without the microphone."></div></div>
+
+  <div class="foot">
+    <p>Your audio stays in this browser tab; nothing is recorded or uploaded. For best results, put your phone or laptop near the piano and play one key at a time.</p>
+    <p>No piano nearby? Click the keys above to answer.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---------- music model ----------
+  const LETTERS = ['C','D','E','F','G','A','B'];
+  const NAT = [0,2,4,5,7,9,11];
+  const SHARP_NAMES = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+  // Diatonic index = octave*7 + letter. Bottom line: treble E4, bass G2.
+  const CLEFS = {
+    treble: { bottom: 30, staff: [29, 39], ext: [26, 42], glyph: '\u{1D11E}', anchor: 0, hand: 'Right hand', name: 'Treble clef' },
+    bass:   { bottom: 18, staff: [17, 27], ext: [14, 30], glyph: '\u{1D122}', anchor: 1, hand: 'Left hand',  name: 'Bass clef' },
+  };
+  const midiOf = n => 12 * (n.oct + 1) + NAT[n.letter] + n.acc;
+  const nameOf = n => LETTERS[n.letter] + (n.acc > 0 ? '♯' : n.acc < 0 ? '♭' : '') + n.oct;
+  const midiName = m => SHARP_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+
+  // ---------- settings ----------
+  const defaults = { hand: 'right', range: 'staff', acc: false, anyOct: false, hint: false, sens: 6 };
+  let S = { ...defaults };
+  try { Object.assign(S, JSON.parse(localStorage.getItem('pst-settings') || '{}')); } catch (e) {}
+  const save = () => { try { localStorage.setItem('pst-settings', JSON.stringify(S)); } catch (e) {} };
+
+  const $ = id => document.getElementById(id);
+  function bindSeg(id, key) {
+    const el = $(id);
+    const sync = () => el.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === S[key])));
+    el.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      S[key] = b.dataset.v; sync(); save(); nextNote(true);
+    });
+    sync();
+  }
+  bindSeg('hand', 'hand');
+  bindSeg('range', 'range');
+  [['acc','acc',true],['anyOct','anyOct',false],['hintOn','hint',false]].forEach(([id, key, renew]) => {
+    $(id).checked = !!S[key];
+    $(id).addEventListener('change', () => { S[key] = $(id).checked; save(); renew ? nextNote(true) : updateHint(); });
+  });
+  $('sens').value = S.sens;
+  $('sens').addEventListener('input', () => { S.sens = +$('sens').value; save(); });
+
+  // ---------- note picking ----------
+  let target = null, clefKey = 'treble', shownAt = performance.now(), prevMidi = null;
+  function pickNote() {
+    const keys = S.hand === 'both' ? ['treble', 'bass'] : [S.hand === 'left' ? 'bass' : 'treble'];
+    for (let tries = 0; tries < 60; tries++) {
+      const ck = keys[Math.floor(Math.random() * keys.length)];
+      const [lo, hi] = CLEFS[ck][S.range === 'ext' ? 'ext' : 'staff'];
+      const d = lo + Math.floor(Math.random() * (hi - lo + 1));
+      const n = { letter: d % 7, oct: Math.floor(d / 7), acc: 0, d };
+      if (S.acc && Math.random() < 0.4) {
+        n.acc = Math.random() < 0.5 ? 1 : -1;
+        const L = LETTERS[n.letter];
+        if ((n.acc > 0 && (L === 'E' || L === 'B')) || (n.acc < 0 && (L === 'C' || L === 'F'))) n.acc = 0;
+      }
+      const m = midiOf(n);
+      if (prevMidi !== null && (m === prevMidi || (S.anyOct && m % 12 === prevMidi % 12))) continue;
+      return { clef: ck, note: n };
+    }
+    return { clef: keys[0], note: { letter: 4, oct: 4, acc: 0, d: 32 } };
+  }
+
+  // ---------- staff drawing ----------
+  const G = 14, BOTTOM = 124, NX = 225;
+  const yOf = step => BOTTOM - step * G / 2;
+  const svg = $('staff');
+  const NS = 'http://www.w3.org/2000/svg';
+  const mk = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+
+  function drawStaff(ck) {
+    svg.textContent = '';
+    for (let i = 0; i < 5; i++) mk('line', { class: 'ln', x1: 14, x2: 346, y1: yOf(i * 2), y2: yOf(i * 2) }, svg);
+    mk('line', { class: 'ln', x1: 14, x2: 14, y1: yOf(8), y2: yOf(0) }, svg);
+    mk('line', { class: 'ln', x1: 346, x2: 346, y1: yOf(8), y2: yOf(0) }, svg);
+    const c = CLEFS[ck];
+    const t = mk('text', { class: 'glyph', x: 22, y: yOf(c.anchor), 'font-size': G * 4 }, svg);
+    t.textContent = c.glyph;
+    svg.dataset.clef = ck;
+  }
+
+  function drawNote(n, ck) {
+    const old = svg.querySelector('.note'); if (old) old.remove();
+    const step = n.d - CLEFS[ck].bottom;
+    const g = mk('g', { class: 'note' }, svg);
+    for (let s = -2; s >= step; s -= 2) mk('line', { class: 'ln', x1: NX - 17, x2: NX + 17, y1: yOf(s), y2: yOf(s) }, g);
+    for (let s = 10; s <= step; s += 2) mk('line', { class: 'ln', x1: NX - 17, x2: NX + 17, y1: yOf(s), y2: yOf(s) }, g);
+    const y = yOf(step);
+    const head = mk('g', { transform: `translate(${NX} ${y})` }, g);
+    mk('ellipse', { class: 'ink', rx: 10.5, ry: 7.2 }, head);
+    mk('ellipse', { class: 'hole', rx: 4.4, ry: 6.2, transform: 'rotate(-58)' }, head);
+    if (n.acc) {
+      const a = mk('text', { class: 'glyph', x: NX - 32, y: n.acc < 0 ? y + 5 : y, 'font-size': G * 4 }, g);
+      a.textContent = n.acc > 0 ? '♯' : '♭';
+    }
+    svg.setAttribute('aria-label', `${CLEFS[ck].name}, note ${S.hint ? nameOf(n) : 'hidden'}`);
+    return g;
+  }
+
+  function updateHint() {
+    $('hint').hidden = !S.hint;
+    $('hint').textContent = target ? 'Name: ' + nameOf(target) : '';
+    document.querySelectorAll('.kbd .hint').forEach(k => k.classList.remove('hint'));
+    if (S.hint && target) { const k = keyEls[midiOf(target)]; if (k) k.classList.add('hint'); }
+  }
+
+  let busy = false;
+  function nextNote(immediate) {
+    const pick = pickNote();
+    target = pick.note; prevMidi = midiOf(target);
+    const show = () => {
+      if (svg.dataset.clef !== pick.clef) drawStaff(pick.clef);
+      clefKey = pick.clef;
+      drawNote(target, pick.clef);
+      $('clefName').textContent = CLEFS[pick.clef].hand + ' · ' + CLEFS[pick.clef].name;
+      updateHint();
+      shownAt = performance.now();
+      busy = false;
+    };
+    if (immediate) show(); else setTimeout(show, 260);
+  }
+
+  // ---------- scoring ----------
+  const times = []; let skipped = 0;
+  function renderStats() {
+    $('sCorrect').textContent = times.length;
+    $('sAvg').textContent = times.length ? (times.reduce((a, b) => a + b, 0) / times.length / 1000).toFixed(1) + 's' : '–';
+    $('sBest').textContent = times.length ? (Math.min(...times) / 1000).toFixed(1) + 's' : '–';
+    $('sSkip').textContent = skipped;
+  }
+
+  function matches(m) {
+    const t = midiOf(target);
+    return m === t || (S.anyOct && ((m - t) % 12 === 0));
+  }
+
+  function answer(m) {
+    if (busy || !target) return false;
+    if (!matches(m)) return false;
+    busy = true;
+    times.push(performance.now() - shownAt); renderStats();
+    const g = svg.querySelector('.note');
+    if (g) { g.classList.add('ok'); setTimeout(() => g.classList.add('out'), 120); }
+    flashKey(m);
+    setStatus('ok', 'Correct · ' + nameOf(target));
+    setTimeout(() => { if (listening) setStatus('on', 'Listening'); }, 700);
+    nextNote(false);
+    return true;
+  }
+
+  $('skipBtn').addEventListener('click', () => { if (busy) return; skipped++; renderStats(); nextNote(true); });
+  $('resetBtn').addEventListener('click', () => { times.length = 0; skipped = 0; renderStats(); });
+
+  // ---------- keyboard ----------
+  const LOW = 36, HIGH = 84; // C2..C6
+  const keyEls = {};
+  (function buildKeyboard() {
+    const kbd = $('kbd');
+    const whites = [];
+    for (let m = LOW; m <= HIGH; m++) if (NAT.includes(m % 12)) whites.push(m);
+    const ww = 100 / whites.length;
+    whites.forEach(m => {
+      const k = document.createElement('div');
+      k.className = 'k w'; k.dataset.m = m;
+      if (m % 12 === 0) k.textContent = 'C' + (m / 12 - 1);
+      kbd.appendChild(k); keyEls[m] = k;
+    });
+    for (let m = LOW; m <= HIGH; m++) {
+      if (NAT.includes(m % 12)) continue;
+      const idx = whites.indexOf(m - 1);
+      const k = document.createElement('div');
+      k.className = 'k b'; k.dataset.m = m;
+      k.style.left = ((idx + 1) * ww - ww * 0.32) + '%';
+      k.style.width = (ww * 0.64) + '%';
+      kbd.appendChild(k); keyEls[m] = k;
+    }
+    kbd.addEventListener('pointerdown', e => {
+      const k = e.target.closest('.k'); if (!k) return;
+      const m = +k.dataset.m;
+      if (!answer(m)) { k.classList.add('heard'); setTimeout(() => k.classList.remove('heard'), 220); }
+    });
+  })();
+
+  function flashKey(m) {
+    const k = keyEls[m]; if (!k) return;
+    k.classList.add('hit'); setTimeout(() => k.classList.remove('hit'), 500);
+  }
+  let heardKey = null;
+  function setHeardKey(m) {
+    if (heardKey === m) return;
+    if (heardKey !== null && keyEls[heardKey]) keyEls[heardKey].classList.remove('heard');
+    heardKey = m;
+    if (m !== null && keyEls[m]) keyEls[m].classList.add('heard');
+  }
+
+  // ---------- pitch detection (YIN) ----------
+  function yin(buf, sr) {
+    const W = buf.length >> 1;
+    const tauMin = Math.floor(sr / 1100), tauMax = Math.min(W - 1, Math.floor(sr / 58));
+    const d = new Float32Array(tauMax + 1);
+    for (let tau = 1; tau <= tauMax; tau++) {
+      let s = 0;
+      for (let i = 0; i < W; i++) { const x = buf[i] - buf[i + tau]; s += x * x; }
+      d[tau] = s;
+    }
+    d[0] = 1; let run = 0;
+    for (let tau = 1; tau <= tauMax; tau++) { run += d[tau]; d[tau] = run ? d[tau] * tau / run : 1; }
+    let tau = -1;
+    for (let t = tauMin; t <= tauMax; t++) {
+      if (d[t] < 0.15) { while (t + 1 <= tauMax && d[t + 1] < d[t]) t++; tau = t; break; }
+    }
+    if (tau < 0) return null;
+    let better = tau;
+    if (tau > 1 && tau < tauMax) {
+      const a = d[tau - 1], b = d[tau], c = d[tau + 1], den = a + c - 2 * b;
+      if (den) better = tau + (a - c) / (2 * den);
+    }
+    return { freq: sr / better, clarity: 1 - d[tau] };
+  }
+
+  // ---------- microphone ----------
+  let ctx = null, analyser = null, stream = null, buf = null, timer = null, listening = false, wake = null;
+  let lastM = null, run = 0;
+
+  function setStatus(s, text) { const el = $('status'); el.dataset.s = s; el.textContent = text; }
+
+  async function start() {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setStatus('err', 'Microphone needs an https page'); return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (e) {
+      setStatus('err', e.name === 'NotAllowedError' ? 'Microphone blocked. Allow it in the address bar.' : e.name === 'NotFoundError' ? 'No microphone found' : 'Could not open the microphone');
+      return;
+    }
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.resume();
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 4096;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    buf = new Float32Array(analyser.fftSize);
+    timer = setInterval(tick, 40);
+    listening = true;
+    $('startBtn').textContent = 'Stop listening';
+    setStatus('on', 'Listening');
+    try { wake = await navigator.wakeLock?.request('screen'); } catch (e) {}
+  }
+
+  function stop() {
+    clearInterval(timer); timer = null; listening = false;
+    stream?.getTracks().forEach(t => t.stop()); stream = null;
+    ctx?.close(); ctx = null;
+    try { wake?.release(); } catch (e) {} wake = null;
+    $('startBtn').textContent = 'Start listening';
+    setStatus('off', 'Microphone off');
+    $('level').style.width = '0';
+    showHeard(null);
+  }
+
+  $('startBtn').addEventListener('click', () => listening ? stop() : start());
+  document.addEventListener('visibilitychange', async () => {
+    if (listening && document.visibilityState === 'visible') {
+      try { await ctx?.resume(); wake = await navigator.wakeLock?.request('screen'); } catch (e) {}
+    }
+  });
+
+  function showHeard(m, cents) {
+    const hn = $('heardNote'), tn = $('tune');
+    if (m === null || m === undefined) {
+      hn.textContent = '–'; hn.className = 'heard-note'; tn.style.opacity = 0; setHeardKey(null); return;
+    }
+    hn.textContent = midiName(m);
+    hn.className = 'heard-note ' + (target && matches(m) ? 'match' : 'miss');
+    tn.style.opacity = 1;
+    tn.style.left = (50 + Math.max(-50, Math.min(50, cents))) + '%';
+    setHeardKey(m);
+  }
+
+  function tick() {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    $('level').style.width = Math.min(100, rms * 600) + '%';
+    const gate = 0.004 * Math.pow(1.45, 10 - S.sens); // sens 10 → 0.004, sens 1 → ~0.11
+    if (rms < gate) { lastM = null; run = 0; showHeard(null); return; }
+    const r = yin(buf, ctx.sampleRate);
+    if (!r || r.freq < 55 || r.freq > 1200) { run = 0; return; }
+    const mf = 69 + 12 * Math.log2(r.freq / 440);
+    const m = Math.round(mf);
+    if (m === lastM) run++; else { lastM = m; run = 1; }
+    if (run >= 2) showHeard(m, (mf - m) * 100);
+    if (run >= 3) answer(m);
+  }
+
+  // ---------- go ----------
+  renderStats();
+  nextNote(true);
+})();
+</script>
+</body>
+</html>
